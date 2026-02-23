@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { searchGlobalFoodDatabase } from "./actions";
+import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
 
 interface FoodItem {
   id: string;
@@ -18,6 +19,7 @@ const REWARDS_CATALOG = [
 ];
 
 export default function Home() {
+  const { isLoaded, isSignedIn, user } = useUser();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRewardsOpen, setIsRewardsOpen] = useState(false);
   
@@ -26,11 +28,6 @@ export default function Home() {
   const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-
-  // LOGOWANIE I REJESTRACJA
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('register'); // NOWOŚĆ: Tryb okienka
 
   const [items, setItems] = useState<FoodItem[]>([]);
   const [foodName, setFoodName] = useState("");
@@ -45,15 +42,43 @@ export default function Home() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchMessage, setSearchMessage] = useState("");
 
+  const activatePremium = (days: number) => {
+    const expiry = new Date();
+    expiry.setDate(expiry.getDate() + days);
+    setIsPremium(true);
+    setPremiumExpiryDate(expiry.toLocaleDateString());
+    localStorage.setItem("saveEat_isPremium", "true");
+    localStorage.setItem("saveEat_premiumExpiry", expiry.toISOString());
+  };
+
+  // PRZYWRÓCONA FUNKCJA: Darmowe 7 dni za rejestrację
   useEffect(() => {
+    if (isSignedIn && user) {
+      const hasReceivedWelcome = localStorage.getItem(`welcome_premium_${user.id}`);
+      if (!hasReceivedWelcome) {
+        activatePremium(7);
+        localStorage.setItem(`welcome_premium_${user.id}`, "true");
+        alert("🎉 Witaj w SaveEat!\nW nagrodę za rejestrację otrzymujesz 7 DNI PREMIUM za darmo.");
+      }
+    }
+  }, [isSignedIn, user]);
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("success")) {
+      alert("Płatność potwierdzona przez bank! Witamy w Premium 👑");
+      activatePremium(30);
+      window.history.pushState({}, document.title, window.location.pathname);
+    }
+    if (query.get("canceled")) {
+      alert("Płatność anulowana.");
+      window.history.pushState({}, document.title, window.location.pathname);
+    }
+
     const savedItems = localStorage.getItem("saveEat_items");
     if (savedItems) setItems(JSON.parse(savedItems));
-    
     const savedCount = localStorage.getItem("saveEat_savedCount");
     if (savedCount) setSavedItemsCount(parseInt(savedCount, 10));
-
-    const loginStatus = localStorage.getItem("saveEat_isLoggedIn");
-    if (loginStatus === "true") setIsLoggedIn(true);
 
     const savedExpiry = localStorage.getItem("saveEat_premiumExpiry");
     if (savedExpiry) {
@@ -64,14 +89,9 @@ export default function Home() {
         setPremiumExpiryDate(null);
         localStorage.removeItem("saveEat_isPremium");
         localStorage.removeItem("saveEat_premiumExpiry");
-        if (localStorage.getItem("saveEat_wasPremiumNotified") !== "true") {
-          alert("⚠️ Twój okres Premium właśnie wygasł. Odnów subskrypcję, aby dalej korzystać ze Skanera AI.");
-          localStorage.setItem("saveEat_wasPremiumNotified", "true");
-        }
       } else {
         setIsPremium(true);
         setPremiumExpiryDate(expiryDateObj.toLocaleDateString());
-        localStorage.removeItem("saveEat_wasPremiumNotified"); 
       }
     }
 
@@ -129,56 +149,22 @@ export default function Home() {
     return () => clearTimeout(delayDebounceFn);
   }, [foodName, showSuggestions]);
 
-  const activatePremium = (days: number, message: string) => {
-    const expiry = new Date();
-    expiry.setDate(expiry.getDate() + days);
-    setIsPremium(true);
-    setPremiumExpiryDate(expiry.toLocaleDateString());
-    localStorage.setItem("saveEat_isPremium", "true");
-    localStorage.setItem("saveEat_premiumExpiry", expiry.toISOString());
-    localStorage.removeItem("saveEat_wasPremiumNotified");
-    alert(`${message}\n\nWażne do: ${expiry.toLocaleDateString()}`);
-  };
-
-  // NOWA FUNKCJA AUTORYZACJI (Logowanie vs Rejestracja)
-  const handleAuthSubmit = (provider?: 'google' | 'apple') => {
-    const providerText = provider ? `przez ${provider === 'google' ? 'Google' : 'Apple'}` : "e-mailem";
-
-    if (authMode === 'register') {
-      // Rejestracja
-      localStorage.setItem("saveEat_hasAccount", "true");
-      setIsLoggedIn(true);
-      localStorage.setItem("saveEat_isLoggedIn", "true");
-      
-      if (!isPremium) {
-        activatePremium(7, `🎉 Konto utworzone pomyślnie ${providerText}!\n\nW nagrodę otrzymujesz 7 DNI PREMIUM całkowicie za darmo. Twój Skaner Paragonów AI jest już aktywny!`);
-      } else {
-        alert(`Konto utworzone ${providerText}!`);
-      }
-    } else {
-      // Logowanie
-      const hasAccount = localStorage.getItem("saveEat_hasAccount");
-      if (!hasAccount && !provider) {
-        alert("❌ Nie znaleziono konta z tym adresem e-mail. Przejdź do zakładki Rejestracja, aby założyć konto!");
-        return;
-      }
-      setIsLoggedIn(true);
-      localStorage.setItem("saveEat_isLoggedIn", "true");
-      alert(`Zalogowano pomyślnie ${providerText}! Wracamy do lodówki.`);
+  const handleBuyPremiumReal = async () => {
+    if (!isSignedIn) {
+      alert("Musisz się zalogować, zanim kupisz Premium!");
+      return;
     }
-    
-    setIsAuthModalOpen(false);
-  };
-
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    localStorage.setItem("saveEat_isLoggedIn", "false");
-    alert("Wylogowano pomyślnie.");
-  };
-
-  const handleBuyPremium = () => {
-    activatePremium(30, "Płatność zakończona sukcesem! 🎉\nTwoja subskrypcja została przedłużona o 30 dni.");
-    setIsPremiumModalOpen(false);
+    try {
+      const response = await fetch('/api/checkout', { method: 'POST' });
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url; 
+      } else {
+        alert("Błąd: Serwer nie zwrócił linku do płatności.");
+      }
+    } catch (error) {
+      alert("Błąd połączenia z serwerem płatności.");
+    }
   };
 
   const handleAddItem = () => {
@@ -192,10 +178,9 @@ export default function Home() {
   };
 
   const handleEatItem = (idToRemove: string) => {
-    if (pointsToday >= 3) {
-      alert("🛑 Dzienny limit osiągnięty!\n\nZdobyłeś już dzisiaj maksymalną liczbę punktów (3/3). \nProdukt został usunięty z lodówki, ale punkt nie zostanie doliczony. Wróć jutro po więcej!");
-      setItems(items.filter((item) => item.id !== idToRemove));
-      return;
+    if (pointsToday >= 3 && !isPremium) {
+      alert("🛑 Dzienny limit osiągnięty (3/3)! Wróć jutro lub odblokuj Premium, aby usunąć limit.");
+      return; 
     }
     setItems(items.filter((item) => item.id !== idToRemove));
     const newTotalCount = savedItemsCount + 1;
@@ -209,20 +194,17 @@ export default function Home() {
 
   const handleClaimReward = (cost: number, title: string) => {
     if (savedItemsCount >= cost) {
-      const newCount = savedItemsCount - cost;
-      setSavedItemsCount(newCount);
-      localStorage.setItem("saveEat_savedCount", newCount.toString());
-      
+      setSavedItemsCount(savedItemsCount - cost);
+      localStorage.setItem("saveEat_savedCount", (savedItemsCount - cost).toString());
       if (title.includes("Premium")) {
-        activatePremium(30, "👑 Witaj w gronie Premium! Złoty skaner paragonów został odblokowany na kolejne 30 dni.");
+        activatePremium(30);
+        alert("👑 Złoty skaner paragonów został odblokowany na kolejne 30 dni.");
         setIsRewardsOpen(false);
         return;
       }
-      const randomCode = `SAVE-${Math.floor(1000 + Math.random() * 9000)}`;
-      alert(`🎉 Gratulacje! Odebrałeś: ${title}.\n\nTwój kod to: ${randomCode}\n(Skopiuj go i użyj w koszyku!)`);
+      alert(`🎉 Odebrałeś: ${title}.\nTwój kod to: SAVE-${Math.floor(1000 + Math.random() * 9000)}`);
     } else {
-      const missing = cost - savedItemsCount;
-      alert(`❌ Brakuje Ci ${missing} punktów do tej nagrody.\nUratuj więcej jedzenia przed zepsuciem!`);
+      alert(`❌ Brakuje Ci ${cost - savedItemsCount} punktów.`);
     }
   };
 
@@ -231,15 +213,11 @@ export default function Home() {
     setTimeout(() => {
       const today = new Date();
       const nextWeek = new Date(today); nextWeek.setDate(today.getDate() + 7);
-      const nextMonth = new Date(today); nextMonth.setDate(today.getDate() + 30);
       const scannedItems: FoodItem[] = [
-        { id: Date.now().toString() + "1", name: "Mleko Łaciate 3.2% (Biedronka)", expiryDate: nextWeek.toISOString().split('T')[0], addedAt: Date.now() },
-        { id: Date.now().toString() + "2", name: "Masło Extra Piątnica", expiryDate: nextMonth.toISOString().split('T')[0], addedAt: Date.now() },
-        { id: Date.now().toString() + "3", name: "Chleb pszenny", expiryDate: new Date(today.setDate(today.getDate() + 3)).toISOString().split('T')[0], addedAt: Date.now() },
+        { id: Date.now().toString() + "1", name: "Mleko (Skaner AI)", expiryDate: nextWeek.toISOString().split('T')[0], addedAt: Date.now() },
       ];
       setItems([...items, ...scannedItems]);
       setIsScanning(false); setIsScannerOpen(false);
-      alert("📸 Skanowanie zakończone!\n\nAI rozpoznało 3 produkty z paragonu i automatycznie dodało je do lodówki.");
     }, 2500);
   };
 
@@ -266,11 +244,6 @@ export default function Home() {
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans text-gray-900">
       
       <div className="relative w-full h-48 sm:h-64 bg-green-800 overflow-hidden">
-        <img 
-          src="https://images.unsplash.com/photo-1498837167922-41c53bbf40d4?q=80&w=2070&auto=format&fit=crop" 
-          alt="Świeże jedzenie" 
-          className="w-full h-full object-cover opacity-40 mix-blend-overlay"
-        />
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
           <h1 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight drop-shadow-lg mb-2">
             SaveEat <span className="text-green-400">🥦</span>
@@ -282,25 +255,28 @@ export default function Home() {
       </div>
 
       <div className="flex-grow p-4 sm:p-6 pb-20 -mt-6 sm:-mt-10 relative z-10">
-        
         <header className="mb-6 flex flex-col sm:flex-row items-center justify-center sm:justify-between max-w-3xl mx-auto gap-4 bg-white p-4 rounded-2xl shadow-md border border-gray-100">
           <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 w-full">
             
-            {!isLoggedIn ? (
-              <button 
-                onClick={() => {
-                  setAuthMode('login'); // Domyślnie otwieramy na logowaniu
-                  setIsAuthModalOpen(true);
-                }} 
-                className="text-gray-600 hover:text-green-600 font-bold px-3 py-2 transition-colors border border-gray-300 rounded-xl hover:border-green-600"
-              >
-                Zaloguj się
-              </button>
-            ) : (
-              <button onClick={handleLogout} className="text-gray-500 hover:text-red-500 font-bold px-3 py-2 transition-colors bg-gray-50 rounded-xl border border-transparent hover:border-red-200" title="Wyloguj">
-                👤 Wyloguj
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {!isLoaded ? (
+                <div className="animate-pulse w-8 h-8 bg-gray-200 rounded-full"></div>
+              ) : !isSignedIn ? (
+                <div className="flex gap-2">
+                  <SignInButton mode="modal">
+                    <button className="text-gray-600 hover:text-green-600 font-bold px-4 py-2 border border-gray-300 rounded-xl hover:border-green-600 transition-colors">Logowanie</button>
+                  </SignInButton>
+                  <SignUpButton mode="modal">
+                    <button className="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-xl transition-colors">Rejestracja</button>
+                  </SignUpButton>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 bg-gray-50 px-4 py-2 rounded-xl border border-gray-200">
+                  <UserButton afterSignOutUrl="/" />
+                  <span className="font-bold text-sm hidden sm:block">Witaj, {user?.firstName || 'Użytkowniku'}</span>
+                </div>
+              )}
+            </div>
 
             <button onClick={() => setIsRewardsOpen(true)} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-md transition-all active:scale-95 flex items-center gap-2">
               <span>🎁</span> <span className="hidden sm:inline">Nagrody</span>
@@ -328,23 +304,17 @@ export default function Home() {
         </header>
 
         {isPremium && (
-          <div className="max-w-3xl mx-auto mb-4 text-center text-sm font-medium text-amber-600 bg-amber-50 py-2 rounded-xl border border-amber-200">
+          <div className="max-w-3xl mx-auto mb-4 text-center text-sm font-medium text-amber-600 bg-amber-50 py-2 rounded-xl border border-amber-200 shadow-sm">
             Konto Premium aktywne. Ważne do: <span className="font-bold">{premiumExpiryDate}</span>
           </div>
         )}
 
         <div className="max-w-3xl mx-auto mb-8 bg-gradient-to-br from-green-500 to-green-700 rounded-3xl p-6 text-white shadow-lg flex justify-between items-center cursor-pointer hover:scale-[1.02] transition-transform" onClick={() => setIsRewardsOpen(true)}>
           <div>
-            <h3 className="text-xl font-bold mb-1 flex items-center gap-2">
-              <span>Twój wpływ na planetę</span> 🌍
-            </h3>
-            <p className="text-green-100 font-medium text-sm">
-              Kliknij, by wymienić punkty. Dziś uratowano: {pointsToday}/3
-            </p>
+            <h3 className="text-xl font-bold mb-1 flex items-center gap-2"><span>Twój wpływ na planetę</span> 🌍</h3>
+            <p className="text-green-100 font-medium text-sm">Kliknij, by wymienić punkty. Dziś uratowano: {pointsToday}/3</p>
           </div>
-          <div className="text-5xl font-extrabold drop-shadow-md bg-white/20 px-4 py-2 rounded-2xl">
-            {savedItemsCount}
-          </div>
+          <div className="text-5xl font-extrabold drop-shadow-md bg-white/20 px-4 py-2 rounded-2xl">{savedItemsCount}</div>
         </div>
 
         <main className="flex flex-col items-center justify-center bg-white rounded-3xl shadow-sm border border-gray-100 p-8 max-w-3xl mx-auto min-h-[250px] mb-8">
@@ -352,9 +322,7 @@ export default function Home() {
             <div className="flex flex-col items-center py-6">
               <div className="text-7xl mb-6 opacity-80">🧊</div>
               <h2 className="text-2xl font-bold mb-3 text-gray-800">Twoja lodówka jest pusta</h2>
-              <p className="text-gray-500 text-center text-lg max-w-md mb-6">
-                Czas uratować trochę jedzenia przed zmarnowaniem!
-              </p>
+              <p className="text-gray-500 text-center text-lg max-w-md mb-6">Czas uratować trochę jedzenia przed zmarnowaniem!</p>
             </div>
           ) : (
             <div className="w-full">
@@ -362,24 +330,13 @@ export default function Home() {
               <ul className="space-y-4">
                 {sortedItems.map((item) => {
                   const daysLeft = calculateDaysLeft(item.expiryDate);
-                  let statusColor = "text-green-700 bg-green-100 border-green-300";
-                  let statusText = `Świeże (${daysLeft} dni)`;
-                  if (daysLeft < 0) {
-                    statusColor = "text-red-700 bg-red-100 border-red-300";
-                    statusText = `Przeterminowane (${Math.abs(daysLeft)} dni temu)`;
-                  } else if (daysLeft <= 3) {
-                    statusColor = "text-orange-700 bg-orange-100 border-orange-300";
-                    statusText = `Zjedz szybko! (${daysLeft} dni)`;
-                  }
+                  let statusColor = "text-green-700 bg-green-100 border-green-300"; let statusText = `Świeże (${daysLeft} dni)`;
+                  if (daysLeft < 0) { statusColor = "text-red-700 bg-red-100 border-red-300"; statusText = `Przeterminowane (${Math.abs(daysLeft)} dni temu)`; }
+                  else if (daysLeft <= 3) { statusColor = "text-orange-700 bg-orange-100 border-orange-300"; statusText = `Zjedz szybko! (${daysLeft} dni)`; }
 
                   return (
                     <li key={item.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all gap-4">
-                      <div className="flex flex-col gap-1.5">
-                        <span className="font-bold text-lg text-gray-800 capitalize">{item.name}</span>
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-md border w-fit ${statusColor}`}>
-                          ⏳ {statusText}
-                        </span>
-                      </div>
+                      <div className="flex flex-col gap-1.5"><span className="font-bold text-lg text-gray-800 capitalize">{item.name}</span><span className={`text-xs font-bold px-2.5 py-1 rounded-md border w-fit ${statusColor}`}>⏳ {statusText}</span></div>
                       <div className="flex gap-2 w-full sm:w-auto">
                         <button onClick={() => handleDeleteMistake(item.id)} className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg font-bold transition-colors border border-transparent">🗑️</button>
                         <button onClick={() => handleEatItem(item.id)} className="flex-1 sm:flex-none text-green-600 hover:text-white hover:bg-green-600 px-4 py-2 rounded-lg font-bold transition-colors border border-green-200 hover:border-transparent flex justify-center items-center gap-2 shadow-sm">
@@ -395,75 +352,17 @@ export default function Home() {
         </main>
       </div>
 
-      <footer className="mt-auto bg-gray-900 text-gray-300 py-10 text-center">
+      {/* PRZYWRÓCONA STOPKA Z MAILEM */}
+      <footer className="mt-auto bg-gray-900 text-gray-300 py-10 text-center relative z-10">
         <div className="max-w-2xl mx-auto px-6">
           <p className="font-extrabold text-2xl mb-2 text-white tracking-tight">SaveEat 🥦</p>
           <p className="text-sm mb-6 text-gray-400">Polska aplikacja walcząca z marnowaniem żywności. Dołącz do naszej misji i oszczędzaj środowisko (oraz portfel!).</p>
           <div className="pt-6 border-t border-gray-700 text-sm flex flex-col items-center gap-2">
             <p>Masz problem z aplikacją lub płatnościami?</p>
-            <a href="mailto:supportsaveeat@gmail.com." className="bg-gray-800 hover:bg-gray-700 text-green-400 px-4 py-2 rounded-lg font-bold inline-block transition-colors border border-gray-700 hover:border-green-500">
-              Napisz do nas: supportsaveeat@gmail.com
-            </a>
+            <a href="mailto:support@saveeat.pl" className="bg-gray-800 hover:bg-gray-700 text-green-400 px-4 py-2 rounded-lg font-bold inline-block transition-colors border border-gray-700 hover:border-green-500">Napisz do nas: support@saveeat.pl</a>
           </div>
         </div>
       </footer>
-
-      {/* NOWE MODAL: PROFESJONALNA REJESTRACJA / LOGOWANIE */}
-      {isAuthModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md relative text-center">
-            <button onClick={() => setIsAuthModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-800 text-xl font-bold">✕</button>
-            
-            <h2 className="text-3xl font-extrabold text-gray-800 mb-6">Witaj w SaveEat!</h2>
-            
-            {/* Zakładki Logowanie / Rejestracja */}
-            <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
-              <button 
-                onClick={() => setAuthMode('login')} 
-                className={`flex-1 py-2.5 rounded-lg font-bold text-sm transition-all ${authMode === 'login' ? 'bg-white shadow-sm text-green-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Logowanie
-              </button>
-              <button 
-                onClick={() => setAuthMode('register')} 
-                className={`flex-1 py-2.5 rounded-lg font-bold text-sm transition-all ${authMode === 'register' ? 'bg-white shadow-sm text-green-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Rejestracja
-              </button>
-            </div>
-
-            {/* Zachęta do rejestracji (widoczna tylko w zakładce Rejestracja) */}
-            {authMode === 'register' && (
-              <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl mb-6 text-sm text-left">
-                <span className="font-bold">🎁 Zarejestruj się dziś!</span> Zyskasz 7 dni dostępu do Skanera AI za darmo.
-              </div>
-            )}
-
-            {/* Przyciski Social Login */}
-            <div className="flex flex-col gap-3 mb-6">
-              <button onClick={() => handleAuthSubmit('google')} className="w-full flex items-center justify-center gap-3 border border-gray-300 bg-white text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-50 transition-colors">
-                <span className="text-xl">🌐</span> {authMode === 'login' ? 'Zaloguj przez Google' : 'Zarejestruj przez Google'}
-              </button>
-              <button onClick={() => handleAuthSubmit('apple')} className="w-full flex items-center justify-center gap-3 bg-black text-white font-bold py-3 rounded-xl hover:bg-gray-800 transition-colors">
-                <span className="text-xl">🍎</span> {authMode === 'login' ? 'Zaloguj przez Apple' : 'Zarejestruj przez Apple'}
-              </button>
-            </div>
-
-            <div className="relative flex items-center py-2 mb-6">
-              <div className="flex-grow border-t border-gray-200"></div>
-              <span className="flex-shrink-0 mx-4 text-gray-400 text-sm font-medium">lub e-mailem</span>
-              <div className="flex-grow border-t border-gray-200"></div>
-            </div>
-
-            <input type="email" placeholder="Twój e-mail" className="w-full p-4 border border-gray-200 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-green-500 bg-gray-50" />
-            <input type="password" placeholder="Hasło" className="w-full p-4 border border-gray-200 rounded-xl mb-6 focus:outline-none focus:ring-2 focus:ring-green-500 bg-gray-50" />
-            
-            <button onClick={() => handleAuthSubmit()} className="w-full bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-xl hover:bg-green-700 transition-all text-lg">
-              {authMode === 'login' ? 'Zaloguj się' : 'Utwórz konto'}
-            </button>
-          </div>
-        </div>
-      )}
 
       {isPremiumModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -472,17 +371,20 @@ export default function Home() {
             <div className="text-center mb-6">
               <div className="text-6xl mb-4">👑</div>
               <h2 className="text-3xl font-extrabold text-amber-600 mb-2">SaveEat Premium</h2>
-              <p className="text-gray-500 font-medium">
-                {isPremium ? `Twoje premium wygasa: ${premiumExpiryDate}. Przedłuż swój dostęp!` : "Odblokuj pełną moc sztucznej inteligencji."}
-              </p>
+              <p className="text-gray-500 font-medium mb-4">{isPremium ? `Twoje premium wygasa: ${premiumExpiryDate}. Przedłuż swój dostęp!` : "Odblokuj pełną moc sztucznej inteligencji."}</p>
+              
+              <div className="bg-white border border-gray-100 shadow-sm rounded-2xl py-3 px-4 inline-block mb-2">
+                <p className="text-3xl font-black text-gray-900">19,99 zł <span className="text-sm font-bold text-gray-400">/ miesiąc</span></p>
+              </div>
             </div>
+
             <ul className="space-y-3 mb-8 text-gray-700">
-              <li className="flex items-center gap-3">✅ <span className="font-bold">Skaner paragonów AI</span> (Automatyczne dodawanie)</li>
+              <li className="flex items-center gap-3">✅ <span className="font-bold">Skaner paragonów AI</span></li>
               <li className="flex items-center gap-3">✅ Limit punktów usunięty</li>
               <li className="flex items-center gap-3">✅ Wyszukiwanie produktów premium</li>
             </ul>
-            <button onClick={handleBuyPremium} className="w-full bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all text-lg">
-              {isPremium ? "Przedłuż za 9.99 zł / msc" : "Kup za 19.99 zł / msc"}
+            <button onClick={handleBuyPremiumReal} className="w-full bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all text-lg">
+              {isPremium ? "💳 Przedłuż bezpiecznie" : "💳 Kup bezpiecznie"}
             </button>
           </div>
         </div>
