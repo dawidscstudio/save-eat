@@ -384,7 +384,7 @@ export default function Home() {
               <li className="flex items-center gap-3">✅ Wyszukiwanie produktów premium</li>
             </ul>
             <button onClick={handleBuyPremiumReal} className="w-full bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all text-lg">
-              {isPremium ? "💳 Przedłuż bezpiecznie" : "💳 Kup bezpiecznie"}
+              {isPremium ? "💳 Zapłać i odblokuj Premium" : "💳 Kup bezpiecznie"}
             </button>
           </div>
         </div>
