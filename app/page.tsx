@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { searchGlobalFoodDatabase, searchProductByBarcode } from "./actions";
+import { searchProductByBarcode } from "./actions"; // Usunęliśmy stare, wolne wyszukiwanie z actions.ts!
 import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
 import { useZxing } from "react-zxing"; 
 
@@ -156,13 +156,20 @@ export default function Home() {
   useEffect(() => { localStorage.setItem("saveEat_items", JSON.stringify(items)); }, [items]);
   useEffect(() => { localStorage.setItem("saveEat_shoppingList", JSON.stringify(shoppingList)); }, [shoppingList]);
 
+  // --- OMINIĘCIE SERWERA VERCEL - BEZPOŚREDNIE SZUKANIE W LODÓWCE ---
   useEffect(() => {
     if (foodName.trim().length < 2) { setSuggestions([]); setSearchMessage(""); return; }
     if (!showSuggestions) return;
+    
     const delayDebounceFn = setTimeout(async () => {
       setIsSearching(true); setSearchMessage("Szukam... 🌍");
       try {
-        const data = await searchGlobalFoodDatabase(foodName);
+        const safeQuery = encodeURIComponent(foodName.trim());
+        const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${safeQuery}&search_simple=1&action=process&json=1&page_size=15&fields=product_name,brands,image_front_small_url,image_small_url,id`;
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
         if (data && data.products && data.products.length > 0) {
           const validProducts = data.products.filter((p: any) => p.product_name);
           setSuggestions(validProducts.length > 0 ? validProducts : [{ id: 'custom_item', product_name: `Dodaj własny wpis: "${foodName}"` }]);
@@ -171,12 +178,13 @@ export default function Home() {
           setSuggestions([{ id: 'custom_item', product_name: `Dodaj własny wpis: "${foodName}"` }]); setSearchMessage("Brak w bazie.");
         }
       } catch (error) {
-        setSuggestions([{ id: 'custom_item', product_name: `Dodaj własny wpis: "${foodName}"` }]); setSearchMessage("Błąd serwera.");
+        setSuggestions([{ id: 'custom_item', product_name: `Dodaj własny wpis: "${foodName}"` }]); setSearchMessage("Błąd połączenia.");
       } finally { setIsSearching(false); }
     }, 150); 
     return () => clearTimeout(delayDebounceFn);
   }, [foodName, showSuggestions]);
 
+  // --- OMINIĘCIE SERWERA VERCEL - BEZPOŚREDNIE SZUKANIE W LIŚCIE ZAKUPÓW ---
   useEffect(() => {
     if (newShoppingItem.trim().length < 2) { 
       setShoppingSuggestions([]); setShoppingSearchMessage(""); return; 
@@ -186,7 +194,12 @@ export default function Home() {
     const delayDebounceFn = setTimeout(async () => {
       setShoppingSearchMessage("Szukam... 🛒");
       try {
-        const data = await searchGlobalFoodDatabase(newShoppingItem);
+        const safeQuery = encodeURIComponent(newShoppingItem.trim());
+        const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${safeQuery}&search_simple=1&action=process&json=1&page_size=15&fields=product_name,brands,image_front_small_url,image_small_url,id`;
+        
+        const response = await fetch(url);
+        const data = await response.json();
+
         if (data && data.products && data.products.length > 0) {
           const validProducts = data.products.filter((p: any) => p.product_name);
           setShoppingSuggestions(validProducts.length > 0 ? validProducts : [{ id: 'custom_item', product_name: `Dodaj własny wpis: "${newShoppingItem}"` }]);
@@ -197,7 +210,7 @@ export default function Home() {
         }
       } catch (error) {
         setShoppingSuggestions([{ id: 'custom_item', product_name: `Dodaj własny wpis: "${newShoppingItem}"` }]);
-        setShoppingSearchMessage("Błąd serwera.");
+        setShoppingSearchMessage("Błąd połączenia.");
       }
     }, 150); 
     return () => clearTimeout(delayDebounceFn);
